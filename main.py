@@ -1,90 +1,169 @@
-import tensorflow as tf
-from matplotlib import pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
 
-num_h1_nodes = 3
-num_h2_nodes = 2
-num_classes = 2
+np.random.seed(42)
 
-X = tf.placeholder(tf.float32,[None,2])
-Y = tf.placeholder(tf.float32)
+num_input_nodes = 3
+num_h1_nodes = 4
+num_op_nodes = 2
+learning_rate = 0.01
 
-def plot_scatter(epoch,slope,intercept):
-  plt.figure(epoch)
-  data = get_data()
-  x=[]
-  y=[]
-  colors = {1:'r',2:"b"}
-  for point in data["x"]:
-    x.append(point[0])
-    y.append(point[1])
-  c = [colors[a] for a in data["y"]]
-  plt.scatter(x,y,c=c)
+def make_network():
 
-  m = float(slope[1])/float(slope[0])
-  print "y = {}x+{}".format(m,float(intercept))
-  y_values = [m * i + float(intercept) for i in x]
-  # print y_values
-  plt.plot(x, y_values, 'b')
-  plt.savefig("epoch{}.png".format(epoch))
-def get_data():
-  data = []
-  x_list = []
-  y_list = []
-  with open("data.txt") as f:
-    lines = f.read().strip().split("\n")
-    for line in lines:
-      line = [float(x) for x in line.split(",")]
-      x,y = [line[0],line[1]],int(line[2])
-      x_list.append(x)
-      y_list.append(y)
-  return {"x":x_list,"y":y_list}
 
-def define_network(data):
-  h1 = {"weights":tf.Variable(tf.random_normal([2,num_h1_nodes])),"biases":tf.Variable(tf.random_normal([num_h1_nodes]))}
-  h2 = {"weights":tf.Variable(tf.random_normal([num_h1_nodes,num_h2_nodes])),"biases":tf.Variable(tf.random_normal([num_h2_nodes]))}
-  op = {"weights":tf.Variable(tf.random_normal([num_h2_nodes,1])),"biases":tf.Variable(tf.random_normal([1]))}
+  h1_layer = {"weights": np.random.rand(num_input_nodes, num_h1_nodes),
+              "biases": np.random.rand(num_h1_nodes),
+              "deltas":np.zeros(num_h1_nodes),
+              "activation":np.ones(num_h1_nodes),
+              "changes":np.zeros((num_input_nodes,num_h1_nodes))}
+  op_layer = {"weights": np.random.rand(num_h1_nodes, num_op_nodes),
+              "biases": np.random.rand(num_op_nodes),
+              "deltas":np.zeros(num_op_nodes),
+              "activation":np.ones(num_op_nodes),
+              "changes": np.zeros((num_h1_nodes,num_op_nodes))}
+  # op_layer = {"weights": np.random.rand(num_h2_nodes, num_op_nodes), "biases": np.random.rand(num_op_nodes),"influence":np.zeros(num_op_nodes),"output":np.zeros(num_op_nodes)}
 
-  l1 = tf.add(tf.matmul(data, h1["weights"]), h1["biases"])
-  l1 = tf.nn.sigmoid(l1)
+  return [h1_layer, op_layer]
 
-  l2 = tf.add(tf.matmul(l1, h2["weights"]), h2["biases"])
-  l2 = tf.nn.sigmoid(l2)
+network = make_network()
 
-  output = tf.add(tf.matmul(l2, op["weights"]), op["biases"])
 
-  return output
+def summation(layer_input,layer):
+  return np.matmul(layer_input,layer["weights"])+layer["biases"]
 
-def define_perceptron(data):
-  op = {"weights":tf.Variable(tf.zeros([2,1])),"biases":tf.Variable(tf.zeros([1]))}
 
-  output = tf.add(tf.matmul(data, op["weights"]), op["biases"])
-  output = tf.nn.sigmoid(output)
+def sigmoid(neuron_sum):
+  return 1.0/(1.0+np.exp(neuron_sum))
 
-  return output,op
+
+def derivative(output):
+  return output*(1.0-output)
+
+def forward_propagate(x):
+  h1 = sigmoid(summation(x,network[0]))
+  network[0]["activation"] = h1
+  # print h1
+  op = sigmoid(summation(h1,network[1]))
+  network[1]["activation"] = op
+
+  # print network
+  # print derivative(h1)
+  # print derivative(op)
+  # print op
+  # print op
+  return op
+
+def back_propagate(x,y):
+  op_error = (network[1]["activation"]-y)
+  network[1]["deltas"] = op_error*derivative(network[1]["activation"])
+
+  # print network[1]["deltas"]
+
+  # for j in range(num_h1_nodes):
+  #   h1_error = 0.0
+  #   for k in range(num_op_nodes):
+  #     h1_error += network[1]["deltas"][k]*network[1]["weights"][j][k]
+  #   network[0]["deltas"][j] = derivative(network[0]["activation"][j])*h1_error
+
+  h1_error = network[1]["deltas"].dot(network[1]["weights"].T)
+
+  network[0]["deltas"] = h1_error*derivative(network[0]["activation"])
+
+  # print network[0]["deltas"]
+  # print network[0]["activation"].T,(network[1]["deltas"])
+  # network[1]["weights"] += network[0]["activation"].T.dot(network[1]["deltas"])
+  # network[0]["weights"] += np.array(x).T.dot(network[0]["deltas"])
+
+
+  #
+  for j in range(num_h1_nodes):
+    for k in range(num_op_nodes):
+      change = network[1]["deltas"][k]*network[0]["activation"][j]
+      network[1]["weights"][j][k] += learning_rate*change
+
+
+
+  for i in range(num_input_nodes):
+    for j in range(num_h1_nodes):
+      change = network[0]["deltas"][j]*x[i]
+      # print "Change",change
+      network[0]["weights"][i][j] -= learning_rate*change
+
+
+
+
+
+  # return network
+
+def one_hot(y):
+  oh = [[1,0],[0,1]]
+  return oh[y]
+
+
+def test_network(test_data):
+  error = 0.0
+  for index,row in test_data.iterrows():
+    x = row[["x","y","z"]].values
+    y = one_hot(int(row["class"]))
+    y_pred = forward_propagate(x)
+    error += np.sum(0.5*((np.array(y)-y_pred)**2))
+  return error
+
+
+def display_weights():
+  print "h1 weights"
+  print network[0]["weights"]
+  print "h1 biases"
+  print network[0]["biases"]
+  print
+  print "output weights"
+  print network[1]["weights"]
+  print "output biases"
+  print network[1]["biases"]
+
 
 def train_network():
-  data = get_data()
-  x = data["x"]
-  y = data["y"]
-  # Y_pred = define_network(x)
-  Y_pred,perceptron = define_perceptron(x)
-  cost = tf.reduce_mean(tf.squared_difference(Y_pred,Y))
+  x = [3,4,5]
+  y = [0,1]
 
-  optimiser = tf.train.GradientDescentOptimizer(learning_rate=0.001).minimize(cost)
-
-  num_epochs = 100
-  perceptron_w, perceptron_b = None,None
-  with tf.Session() as sess:
-    sess.run(tf.global_variables_initializer())
-    for epoch in range(num_epochs):
-      _,c,perceptron_w,perceptron_b = sess.run([optimiser,cost,perceptron["weights"],perceptron["biases"]],feed_dict={X:x,Y:y})
-      print "Loss: {}, W: {}, b: {}".format(c,perceptron_w,perceptron_b)
-      try:
-        if epoch%10==0:
-          plot_scatter(epoch,perceptron_w,perceptron_b)
-      except:
-        pass
+  num_epochs = 100000
+  for epoch in range(num_epochs):
+    if epoch%(num_epochs/10)==0:
+      print "Epoch:",epoch
+      # display_weights()
+    train_output = forward_propagate(x)
+    back_propagate(x, y)
+    if epoch%(num_epochs/10)==0:
+      # display_weights()
+      print "\nOutput:",train_output
+      print "-" * 30
+      print
 
 
+
+
+
+  # train_df = pd.read_csv("3d_points.csv")
+  #
+  # num_epochs = 1000
+  # for epoch in range(num_epochs):
+  #   train_data, test_data = train_test_split(train_df, test_size=0.2)
+  #   for index,row in train_data.iterrows():
+  #     x = row[["x","y","z"]].values
+  #     y = one_hot(int(row["class"]))
+  #     # print x
+  #     # print y
+  #     # exit()
+  #     forward_propagate(x)
+  #     back_propagate(x,y)
+  #
+  #   if epoch%(num_epochs/10)==0:
+  #     epoch_error = test_network(test_data)
+  #     print epoch_error
 
 train_network()
+
+
+
+
